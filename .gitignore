@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+
+# Production build
+build/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
+
+# Emergent
+.emergent/
+.gitconfig
+
+# Test reports
+test_reports/
+-e 
+# Environment files
+*.env
+*.env.*
+-e 
+# Environment files
+*.env
+*.env.*
