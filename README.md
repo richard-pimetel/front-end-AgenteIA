@@ -11,8 +11,6 @@
 
 **Gerador de código com IA em tempo real usando streaming**
 
-[🚀 Demo ao Vivo](https://frontend-agente-ia.onrender.com) • [📖 Documentação](#-como-usar) • [🐛 Reportar Bug](https://github.com/richard-pimetel/front-end-AgenteIA/issues)
-
 </div>
 
 ---
@@ -22,14 +20,14 @@
 <div align="center">
 
 ### 🏠 Tela Inicial
-![Tela Inicial](https://i.imgur.com/JQkH8Zy.png)
+![Tela Inicial](https://fv5-4.files.fm/thumb_show.php?i=nqeg8w3493&view&v=1&PHPSESSID=af50345d1f138496bb423f9fc18e6f138c42164f)
 
 *Interface limpa e moderna com exemplos de uso*
 
 ---
 
 ### 💬 Chat com Streaming
-![Chat Streaming](https://i.imgur.com/R8pKmYH.png)
+![Chat Streaming](https://fv5-7.files.fm/thumb_show.php?i=7kkqexz6ru&view&v=1&PHPSESSID=af50345d1f138496bb423f9fc18e6f138c42164f)
 
 *Código gerado em tempo real com syntax highlighting*
 
@@ -38,12 +36,12 @@
 ### 🌙 Tema Escuro & Claro
 | Tema Escuro | Tema Claro |
 |:-----------:|:----------:|
-| ![Dark](https://i.imgur.com/dark-theme.png) | ![Light](https://i.imgur.com/light-theme.png) |
+| ![Dark](https://fv5-4.files.fm/thumb_show.php?i=nqeg8w3493&view&v=1&PHPSESSID=af50345d1f138496bb423f9fc18e6f138c42164f) | ![Light](https://fv5-7.files.fm/thumb_show.php?i=zpqydgfvfk&view&v=1&PHPSESSID=af50345d1f138496bb423f9fc18e6f138c42164f) |
 
 ---
 
 ### 📱 Design Responsivo
-![Mobile](https://i.imgur.com/mobile-view.png)
+![Mobile](https://fv5-7.files.fm/thumb_show.php?i=662r37ncy5&view&v=1&PHPSESSID=af50345d1f138496bb423f9fc18e6f138c42164f)
 
 *Funciona perfeitamente em dispositivos móveis*
 
