@@ -132,7 +132,6 @@ function App() {
     streamingMessageRef.current = '';
 
     // Adiciona mensagem de IA vazia para streaming
-    const aiMessageIndex = messages.length + 1;
     setMessages(prev => [...prev, {
       type: 'ai',
       content: '',
