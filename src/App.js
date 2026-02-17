@@ -151,7 +151,15 @@ function App() {
 
   // Save settings when changed
   useEffect(() => {
-    saveSettings();
+    try {
+      localStorage.setItem('richardev-settings', JSON.stringify({
+        language: selectedLanguage,
+        model: selectedModel,
+        darkMode
+      }));
+    } catch (error) {
+      console.log('Erro ao salvar configurações');
+    }
   }, [selectedLanguage, selectedModel, darkMode]);
 
   // Apply dark mode
