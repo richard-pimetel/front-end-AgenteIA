@@ -250,7 +250,6 @@ function App() {
     setLoading(true);
     setStreaming(true);
     streamingMessageRef.current = '';
-    setRetryCount(0);
 
     // Create abort controller for this request
     abortControllerRef.current = new AbortController();
