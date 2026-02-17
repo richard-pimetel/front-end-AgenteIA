@@ -75,7 +75,6 @@ function App() {
   const [selectedModel, setSelectedModel] = useState('llama-3.3-70b-versatile');
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [darkMode, setDarkMode] = useState(true);
-  const [retryCount, setRetryCount] = useState(0);
   
   const messagesEndRef = useRef(null);
   const streamingMessageRef = useRef('');
