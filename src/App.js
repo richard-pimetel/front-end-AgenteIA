@@ -192,18 +192,6 @@ function App() {
     }
   };
 
-  const saveSettings = () => {
-    try {
-      localStorage.setItem('richardev-settings', JSON.stringify({
-        language: selectedLanguage,
-        model: selectedModel,
-        darkMode
-      }));
-    } catch (error) {
-      console.log('Erro ao salvar configurações');
-    }
-  };
-
   const saveToHistory = (prompt, code, language, model) => {
     const newItem = {
       _id: Date.now().toString(),
