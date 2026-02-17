@@ -119,7 +119,7 @@ function App() {
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         e.preventDefault();
         if (input.trim() && !loading) {
-          handleSubmit(e);
+          document.querySelector('[data-testid="send-btn"]')?.click();
         }
       }
       // Ctrl/Cmd + K to focus input
@@ -130,17 +130,24 @@ function App() {
       // Ctrl/Cmd + L to clear chat
       if ((e.ctrlKey || e.metaKey) && e.key === 'l') {
         e.preventDefault();
-        clearChat();
+        if (messages.length > 0) {
+          setMessages([]);
+          showToast('Chat limpo');
+        }
       }
       // Escape to stop generation
-      if (e.key === 'Escape' && streaming) {
-        stopGeneration();
+      if (e.key === 'Escape' && streaming && abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+        setStreaming(false);
+        setLoading(false);
+        showToast('Geração interrompida', 'info');
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [input, loading, streaming]);
+  }, [input, loading, streaming, messages.length]);
 
   // Save settings when changed
   useEffect(() => {
