@@ -3,14 +3,14 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import ReactMarkdown from 'react-markdown';
 import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  Bot, 
-  SendHorizontal, 
-  Copy, 
-  Download, 
-  History, 
-  Trash2, 
-  Menu, 
+import {
+  Bot,
+  SendHorizontal,
+  Copy,
+  Download,
+  History,
+  Trash2,
+  Menu,
   X,
   Loader2,
   Code2,
@@ -75,11 +75,13 @@ function App() {
   const [selectedModel, setSelectedModel] = useState('llama-3.3-70b-versatile');
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [darkMode, setDarkMode] = useState(true);
-  
+  const [currentConversationId, setCurrentConversationId] = useState(() => Date.now().toString());
+
   const messagesEndRef = useRef(null);
   const streamingMessageRef = useRef('');
   const abortControllerRef = useRef(null);
   const inputRef = useRef(null);
+  const messageIdCounterRef = useRef(0);
 
   // Scroll to bottom
   const scrollToBottom = useCallback(() => {
@@ -94,7 +96,7 @@ function App() {
   useEffect(() => {
     loadHistory();
     loadSettings();
-    
+
     if (window.innerWidth <= 768) {
       setSidebarOpen(false);
     }
@@ -102,10 +104,10 @@ function App() {
     // Online/Offline detection
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
-    
+
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
-    
+
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
@@ -192,20 +194,44 @@ function App() {
     }
   };
 
-  const saveToHistory = (prompt, code, language, model) => {
+  const generateMessageId = useCallback(() => {
+    messageIdCounterRef.current += 1;
+    return `msg-${Date.now()}-${messageIdCounterRef.current}`;
+  }, []);
+
+  const saveToHistory = useCallback((convId, allMessages, language, model) => {
+    // Pega o primeiro prompt do usuário como título da conversa
+    const firstUserMsg = allMessages.find(m => m.type === 'user');
+    const lastUserMsg = [...allMessages].reverse().find(m => m.type === 'user');
+    const lastAiMsg = [...allMessages].reverse().find(m => m.type === 'ai');
+
+    if (!firstUserMsg || !lastAiMsg) return;
+
     const newItem = {
-      _id: Date.now().toString(),
-      prompt,
-      code,
+      _id: convId,
+      prompt: firstUserMsg.content,
+      lastPrompt: lastUserMsg?.content || firstUserMsg.content,
+      code: lastAiMsg.content,
+      messages: allMessages.filter(m => m.type !== 'error').map(m => ({
+        id: m.id,
+        type: m.type,
+        content: m.content,
+        language: m.language,
+        timestamp: m.timestamp instanceof Date ? m.timestamp.toISOString() : m.timestamp
+      })),
       language,
       model,
       timestamp: new Date().toISOString()
     };
 
-    const updatedHistory = [newItem, ...history].slice(0, 50); // Increased to 50
-    setHistory(updatedHistory);
-    localStorage.setItem('richardev-history', JSON.stringify(updatedHistory));
-  };
+    setHistory(prev => {
+      // Substitui o item existente de mesma conversa, ou adiciona no topo
+      const filtered = prev.filter(item => item._id !== convId);
+      const updatedHistory = [newItem, ...filtered].slice(0, 50);
+      localStorage.setItem('richardev-history', JSON.stringify(updatedHistory));
+      return updatedHistory;
+    });
+  }, []);
 
   const showToast = (message, type = 'success') => {
     setToast({ message, type });
@@ -225,6 +251,8 @@ function App() {
   const clearChat = () => {
     if (messages.length > 0) {
       setMessages([]);
+      // Gera um novo ID de conversa ao limpar o chat
+      setCurrentConversationId(Date.now().toString());
       showToast('Chat limpo');
     }
   };
@@ -238,7 +266,11 @@ function App() {
       return;
     }
 
+    const userMsgId = generateMessageId();
+    const aiMsgId = generateMessageId();
+
     const userMessage = {
+      id: userMsgId,
       type: 'user',
       content: input,
       timestamp: new Date()
@@ -256,6 +288,7 @@ function App() {
 
     // Add empty AI message for streaming
     setMessages(prev => [...prev, {
+      id: aiMsgId,
       type: 'ai',
       content: '',
       language: selectedLanguage,
@@ -289,19 +322,22 @@ function App() {
 
       while (true) {
         const { done, value } = await reader.read();
-        
+
         if (done) {
           setStreaming(false);
+          // Captura o conteúdo ANTES de qualquer reset
+          const finalContent = streamingMessageRef.current;
           setMessages(prev => {
             const updated = [...prev];
             updated[updated.length - 1] = {
               ...updated[updated.length - 1],
+              content: finalContent,
               streaming: false
             };
+            // Salva o histórico com TODAS as mensagens da conversa atual
+            saveToHistory(currentConversationId, updated, selectedLanguage, selectedModel);
             return updated;
           });
-          
-          saveToHistory(currentInput, streamingMessageRef.current, selectedLanguage, selectedModel);
           break;
         }
 
@@ -312,14 +348,14 @@ function App() {
           if (line.startsWith('data: ')) {
             try {
               const data = JSON.parse(line.slice(6));
-              
+
               if (data.error) {
                 throw new Error(data.error);
               }
-              
+
               if (data.content) {
                 streamingMessageRef.current += data.content;
-                
+
                 setMessages(prev => {
                   const updated = [...prev];
                   updated[updated.length - 1] = {
@@ -332,6 +368,17 @@ function App() {
 
               if (data.done) {
                 setStreaming(false);
+                // Salva o histórico com as mensagens atuais quando recebe sinal de 'done' do SSE
+                const finalContent = streamingMessageRef.current;
+                setMessages(prev => {
+                  const updated = [...prev];
+                  const lastIdx = updated.length - 1;
+                  if (updated[lastIdx]?.type === 'ai') {
+                    updated[lastIdx] = { ...updated[lastIdx], content: finalContent, streaming: false };
+                    saveToHistory(currentConversationId, updated, selectedLanguage, selectedModel);
+                  }
+                  return updated;
+                });
               }
             } catch (parseError) {
               if (parseError.name !== 'SyntaxError') {
@@ -344,7 +391,7 @@ function App() {
 
     } catch (error) {
       setStreaming(false);
-      
+
       if (error.name === 'AbortError') {
         // Request was cancelled, don't show error
         setMessages(prev => {
@@ -356,11 +403,12 @@ function App() {
         });
         return;
       }
-      
+
       // Remove empty streaming message and add error
       setMessages(prev => {
         const updated = prev.slice(0, -1);
         return [...updated, {
+          id: generateMessageId(),
           type: 'error',
           content: error.message || 'Falha na conexão com o servidor',
           originalPrompt: currentInput,
@@ -371,8 +419,11 @@ function App() {
       showToast(error.message || 'Erro na requisição', 'error');
     } finally {
       setLoading(false);
-      streamingMessageRef.current = '';
-      abortControllerRef.current = null;
+      // Reset ref DEPOIS de tudo, evitando race condition com saveToHistory
+      setTimeout(() => {
+        streamingMessageRef.current = '';
+        abortControllerRef.current = null;
+      }, 0);
     }
   };
 
@@ -438,11 +489,11 @@ function App() {
       html: 'html',
       shell: 'sh'
     };
-    
+
     const ext = extensions[language] || 'txt';
     const timestamp = new Date().toISOString().slice(0, 10);
     const filename = `code_${timestamp}.${ext}`;
-    
+
     const blob = new Blob([code], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -454,29 +505,44 @@ function App() {
   };
 
   const loadFromHistory = (item) => {
-    const userMessage = {
-      type: 'user',
-      content: item.prompt,
-      timestamp: new Date(item.timestamp)
-    };
+    // Restaura conversa completa se disponível, senão cria par simples
+    if (item.messages && item.messages.length > 0) {
+      const restored = item.messages.map(m => ({
+        ...m,
+        id: m.id || generateMessageId(),
+        timestamp: m.timestamp ? new Date(m.timestamp) : new Date(item.timestamp)
+      }));
+      setMessages(restored);
+    } else {
+      const userMessage = {
+        id: generateMessageId(),
+        type: 'user',
+        content: item.prompt,
+        timestamp: new Date(item.timestamp)
+      };
+      const aiMessage = {
+        id: generateMessageId(),
+        type: 'ai',
+        content: item.code,
+        language: item.language,
+        timestamp: new Date(item.timestamp)
+      };
+      setMessages([userMessage, aiMessage]);
+    }
 
-    const aiMessage = {
-      type: 'ai',
-      content: item.code,
-      language: item.language,
-      timestamp: new Date(item.timestamp)
-    };
+    // Define o conversationId como o da conversa carregada
+    // Isso evita que novas mensagens sejam salvas sob outros IDs
+    setCurrentConversationId(item._id);
 
-    setMessages([userMessage, aiMessage]);
-    setSelectedLanguage(item.language);
+    setSelectedLanguage(item.language || 'auto');
     if (item.model) {
       setSelectedModel(item.model);
     }
-    
+
     if (window.innerWidth <= 768) {
       setSidebarOpen(false);
     }
-    
+
     showToast('Conversa carregada');
   };
 
@@ -519,7 +585,7 @@ function App() {
       )}
 
       {/* Sidebar Overlay */}
-      <div 
+      <div
         className={`sidebar-overlay ${sidebarOpen ? 'visible' : ''}`}
         onClick={() => setSidebarOpen(false)}
       />
@@ -540,7 +606,7 @@ function App() {
 
         {/* New Chat Button */}
         <div className="new-chat-section">
-          <button 
+          <button
             className="new-chat-btn"
             onClick={clearChat}
             disabled={messages.length === 0}
@@ -555,7 +621,7 @@ function App() {
           <div className="settings-group">
             <label className="settings-label">Linguagem</label>
             <div className="select-wrapper">
-              <select 
+              <select
                 className="settings-select"
                 value={selectedLanguage}
                 onChange={(e) => setSelectedLanguage(e.target.value)}
@@ -574,7 +640,7 @@ function App() {
           <div className="settings-group">
             <label className="settings-label">Modelo IA</label>
             <div className="select-wrapper">
-              <select 
+              <select
                 className="settings-select"
                 value={selectedModel}
                 onChange={(e) => setSelectedModel(e.target.value)}
@@ -593,7 +659,7 @@ function App() {
           {/* Theme Toggle */}
           <div className="settings-group theme-toggle-group">
             <label className="settings-label">Tema</label>
-            <button 
+            <button
               className="theme-toggle-btn"
               onClick={() => setDarkMode(!darkMode)}
               title={darkMode ? 'Mudar para tema claro' : 'Mudar para tema escuro'}
@@ -614,16 +680,16 @@ function App() {
             <div className="history-actions">
               {history.length > 0 && (
                 <>
-                  <button 
+                  <button
                     className="history-action-btn"
                     onClick={exportHistory}
                     title="Exportar histórico"
                   >
                     <Download size={14} />
                   </button>
-                  <button 
+                  <button
                     className="history-action-btn danger"
-                    onClick={clearHistory} 
+                    onClick={clearHistory}
                     title="Limpar histórico"
                     data-testid="clear-history-btn"
                   >
@@ -633,36 +699,48 @@ function App() {
               )}
             </div>
           </div>
-          
+
           <div className="history-list">
             {history.length === 0 ? (
               <p className="empty-history">Nenhum histórico ainda</p>
             ) : (
-              history.map((item, index) => (
-                <motion.div
-                  key={item._id || index}
-                  initial={{ opacity: 0, x: -10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: index * 0.02 }}
-                  className="history-item"
-                  onClick={() => loadFromHistory(item)}
-                  data-testid={`history-item-${index}`}
-                >
-                  <p className="history-prompt">{item.prompt}</p>
-                  <div className="history-meta">
-                    <span className="history-language">{item.language}</span>
-                    <span>•</span>
-                    <span>{new Date(item.timestamp).toLocaleDateString('pt-BR')}</span>
-                  </div>
-                  <button 
-                    className="history-delete-btn"
-                    onClick={(e) => deleteHistoryItem(e, item._id)}
-                    title="Remover"
+              history.map((item, index) => {
+                const isActive = item._id === currentConversationId;
+                const msgCount = item.messages ? Math.floor(item.messages.length / 2) : 1;
+                const displayPrompt = item.lastPrompt || item.prompt;
+                return (
+                  <motion.div
+                    key={item._id || index}
+                    initial={{ opacity: 0, x: -10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: index * 0.02 }}
+                    className={`history-item${isActive ? ' history-item-active' : ''}`}
+                    onClick={() => loadFromHistory(item)}
+                    data-testid={`history-item-${index}`}
                   >
-                    <X size={14} />
-                  </button>
-                </motion.div>
-              ))
+                    <p className="history-prompt">{displayPrompt}</p>
+                    <div className="history-meta">
+                      <span className="history-language">{item.language}</span>
+                      <span>•</span>
+                      <span>{new Date(item.timestamp).toLocaleDateString('pt-BR')}</span>
+                      {msgCount > 1 && (
+                        <>
+                          <span>•</span>
+                          <span>{msgCount} trocas</span>
+                        </>
+                      )}
+                      {isActive && <span className="history-active-badge">ativa</span>}
+                    </div>
+                    <button
+                      className="history-delete-btn"
+                      onClick={(e) => deleteHistoryItem(e, item._id)}
+                      title="Remover"
+                    >
+                      <X size={14} />
+                    </button>
+                  </motion.div>
+                );
+              })
             )}
           </div>
         </div>
@@ -682,8 +760,8 @@ function App() {
       <main className="main-content">
         {/* Header */}
         <header className="header">
-          <button 
-            className="mobile-menu-btn" 
+          <button
+            className="mobile-menu-btn"
             onClick={() => setSidebarOpen(!sidebarOpen)}
             data-testid="mobile-menu-btn"
           >
@@ -700,7 +778,7 @@ function App() {
           </div>
           <div className="header-actions">
             {messages.length > 0 && (
-              <button 
+              <button
                 className="header-btn"
                 onClick={clearChat}
                 title="Limpar chat"
@@ -716,7 +794,7 @@ function App() {
           <div className="messages-wrapper">
             {messages.length === 0 ? (
               <div className="welcome">
-                <motion.div 
+                <motion.div
                   className="welcome-icon"
                   initial={{ scale: 0.8, opacity: 0 }}
                   animate={{ scale: 1, opacity: 1 }}
@@ -738,30 +816,30 @@ function App() {
                 >
                   Seu assistente de IA para geração de código em tempo real. Escolha a linguagem e o modelo, e vamos criar algo incrível!
                 </motion.p>
-                <motion.div 
+                <motion.div
                   className="examples"
                   initial={{ y: 20, opacity: 0 }}
                   animate={{ y: 0, opacity: 1 }}
                   transition={{ delay: 0.4 }}
                 >
-                  <button 
-                    className="example-btn" 
+                  <button
+                    className="example-btn"
                     onClick={() => setInput('criar função para validar CPF')}
                     data-testid="example-cpf"
                   >
                     <Terminal size={18} />
                     Validar CPF
                   </button>
-                  <button 
-                    className="example-btn" 
+                  <button
+                    className="example-btn"
                     onClick={() => setInput('criar API REST com autenticação JWT')}
                     data-testid="example-api"
                   >
                     <Braces size={18} />
                     API REST
                   </button>
-                  <button 
-                    className="example-btn" 
+                  <button
+                    className="example-btn"
                     onClick={() => setInput('criar componente React de formulário de login')}
                     data-testid="example-react"
                   >
@@ -770,7 +848,7 @@ function App() {
                   </button>
                 </motion.div>
 
-                <motion.div 
+                <motion.div
                   className="tips"
                   initial={{ y: 20, opacity: 0 }}
                   animate={{ y: 0, opacity: 1 }}
@@ -788,7 +866,7 @@ function App() {
               <AnimatePresence>
                 {messages.map((msg, index) => (
                   <motion.div
-                    key={index}
+                    key={msg.id || `msg-fallback-${index}`}
                     initial={{ opacity: 0, y: 15 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.3 }}
@@ -809,7 +887,7 @@ function App() {
                           </div>
                           {msg.content && !msg.streaming && (
                             <div className="message-actions">
-                              <button 
+                              <button
                                 className="message-action-btn"
                                 onClick={() => copyEntireResponse(msg.content)}
                                 title="Copiar resposta"
@@ -826,7 +904,7 @@ function App() {
                                 code({ node, inline, className, children, ...props }) {
                                   const match = /language-(\w+)/.exec(className || '');
                                   const codeString = String(children).replace(/\n$/, '');
-                                  
+
                                   if (!inline && match) {
                                     return (
                                       <div className="code-block">
@@ -836,7 +914,7 @@ function App() {
                                             {match[1]}
                                           </span>
                                           <div className="code-actions">
-                                            <button 
+                                            <button
                                               className="code-action-btn"
                                               onClick={() => copyToClipboard(codeString)}
                                               title="Copiar código"
@@ -844,14 +922,14 @@ function App() {
                                               <Copy size={14} />
                                               Copiar
                                             </button>
-                                            <button 
+                                            <button
                                               className="code-action-btn"
                                               onClick={() => shareCode(codeString, match[1])}
                                               title="Compartilhar"
                                             >
                                               <Share2 size={14} />
                                             </button>
-                                            <button 
+                                            <button
                                               className="code-action-btn"
                                               onClick={() => downloadCode(codeString, match[1])}
                                               title="Baixar arquivo"
@@ -866,8 +944,8 @@ function App() {
                                             style={vscDarkPlus}
                                             language={match[1]}
                                             PreTag="div"
-                                            customStyle={{ 
-                                              margin: 0, 
+                                            customStyle={{
+                                              margin: 0,
                                               background: 'transparent',
                                               padding: '1.25rem'
                                             }}
@@ -879,7 +957,7 @@ function App() {
                                       </div>
                                     );
                                   }
-                                  
+
                                   return (
                                     <code className="inline-code" {...props}>
                                       {children}
@@ -896,7 +974,7 @@ function App() {
                           <div className="streaming-indicator">
                             <Zap size={14} />
                             Gerando código em tempo real...
-                            <button 
+                            <button
                               className="stop-btn"
                               onClick={stopGeneration}
                               title="Parar geração (Esc)"
@@ -915,7 +993,7 @@ function App() {
                           <p>⚠️ {msg.content}</p>
                         </div>
                         {msg.originalPrompt && (
-                          <button 
+                          <button
                             className="retry-btn"
                             onClick={() => retryLastMessage(msg.originalPrompt)}
                           >
@@ -967,7 +1045,7 @@ function App() {
                 data-testid="chat-input"
               />
               {streaming ? (
-                <button 
+                <button
                   type="button"
                   className="stop-btn-main"
                   onClick={stopGeneration}
@@ -976,8 +1054,8 @@ function App() {
                   <StopCircle size={22} />
                 </button>
               ) : (
-                <button 
-                  type="submit" 
+                <button
+                  type="submit"
                   className="send-btn"
                   disabled={loading || !input.trim() || !isOnline}
                   data-testid="send-btn"
