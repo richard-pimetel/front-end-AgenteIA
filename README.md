@@ -109,7 +109,7 @@ npm start
 
 ```env
 # .env
-REACT_APP_API_URL=https://backend-agente-ia-1.onrender.com/api
+REACT_APP_API_URL=https://backend-agente-ia-2.onrender.com/api
 ```
 
 ---

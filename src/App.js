@@ -32,7 +32,7 @@ import {
 } from 'lucide-react';
 import './App.css';
 
-const API_URL = 'https://backend-agente-ia-1.onrender.com/api';
+const API_URL = 'https://backend-agente-ia-2.onrender.com/api';
 
 // Linguagens disponíveis
 const LANGUAGES = [
@@ -75,6 +75,7 @@ function App() {
   const [selectedModel, setSelectedModel] = useState('llama-3.3-70b-versatile');
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [darkMode, setDarkMode] = useState(true);
+  const [includePreview, setIncludePreview] = useState(true);
   const [currentConversationId, setCurrentConversationId] = useState(() => Date.now().toString());
 
   const messagesEndRef = useRef(null);
@@ -278,6 +279,30 @@ function App() {
 
     setMessages(prev => [...prev, userMessage]);
     const currentInput = input;
+
+    // Ajusta o prompt enviado para o backend em alguns casos
+    let promptForBackend = currentInput;
+
+    // Quando a linguagem selecionada for HTML, força geração de página avançada com CSS embutido (system prompt forte)
+    if (selectedLanguage === 'html') {
+      promptForBackend =
+        'Você é um especialista sênior em UI/UX e CSS moderno. Seu objetivo é gerar páginas HTML altamente refinadas, ' +
+        'no nível de um portfólio premium de designer/desenvolvedor.\n\n' +
+        'Nível de qualidade esperado: uma landing page de portfólio com tema dark sofisticado, tipografia display + body, ' +
+        'paleta com cores neon/gradientes (por exemplo: verde, ciano, roxo), cursor customizado, orbs com blur, fundo com grid/ruído, ' +
+        'seções bem definidas (hero, skills, projetos, depoimentos, contato), animações de entrada, hover com transform/box-shadow, ' +
+        'counters animados, scroll reveal e layout responsivo usando Flexbox + CSS Grid.\n\n' +
+        'Regras obrigatórias:\n' +
+        '1) Gere SEMPRE um ÚNICO arquivo HTML completo com <!DOCTYPE html>, <html>, <head>, <body>.\n' +
+        'Inclua TODO o CSS dentro de uma tag <style> no <head> e, se necessário, JavaScript inline em <script> no final do <body>.\n' +
+        '2) NÃO use layout corporativo simples (header cinza, fundo cinza, caixas retangulares básicas).\n' +
+        'Use tipografia display forte, muito espaço em branco, hierarquia visual clara, efeitos modernos (glassmorphism, sombras profundas, cards flutuantes, orbs com blur, gradientes e ruído de fundo).\n' +
+        '3) Mobile-first: use media queries para adaptar bem em mobile, tablet e desktop.\n' +
+        '4) Organize o CSS em blocos (variáveis, base, layout, componentes, utilitários) e não use arquivos CSS externos nem blocos separados de CSS.\n' +
+        '5) Na saída, retorne APENAS um bloco de código marcado como ```html contendo TODO o HTML, CSS (em <style>) e JS (se houver), sem explicações fora do bloco.\n\n' +
+        'Depois de aplicar TODAS essas regras, atenda ao pedido específico do usuário abaixo:\n\n' +
+        currentInput;
+    }
     setInput('');
     setLoading(true);
     setStreaming(true);
@@ -303,9 +328,11 @@ function App() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          prompt: currentInput,
+          prompt: promptForBackend,
           language: selectedLanguage,
-          model: selectedModel
+          model: selectedModel,
+          detailLevel: 'pro',
+          preview: includePreview
         }),
         signal: abortControllerRef.current.signal
       });
@@ -319,13 +346,26 @@ function App() {
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
+      let buffer = '';
 
       while (true) {
         const { done, value } = await reader.read();
 
         if (done) {
+          // Processa qualquer pedaço restante no buffer
+          const remaining = buffer.trim();
+          if (remaining.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(remaining.slice(6));
+              if (data.content) {
+                streamingMessageRef.current += data.content;
+              }
+            } catch {
+              // ignora último pedaço mal formatado ao encerrar
+            }
+          }
+
           setStreaming(false);
-          // Captura o conteúdo ANTES de qualquer reset
           const finalContent = streamingMessageRef.current;
           setMessages(prev => {
             const updated = [...prev];
@@ -334,57 +374,58 @@ function App() {
               content: finalContent,
               streaming: false
             };
-            // Salva o histórico com TODAS as mensagens da conversa atual
             saveToHistory(currentConversationId, updated, selectedLanguage, selectedModel);
             return updated;
           });
           break;
         }
 
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('\n');
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        // mantém a última linha (possivelmente incompleta) no buffer
+        buffer = lines.pop() || '';
 
         for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try {
-              const data = JSON.parse(line.slice(6));
+          if (!line.startsWith('data: ')) continue;
 
-              if (data.error) {
-                throw new Error(data.error);
-              }
+          try {
+            const data = JSON.parse(line.slice(6));
 
-              if (data.content) {
-                streamingMessageRef.current += data.content;
-
-                setMessages(prev => {
-                  const updated = [...prev];
-                  updated[updated.length - 1] = {
-                    ...updated[updated.length - 1],
-                    content: streamingMessageRef.current
-                  };
-                  return updated;
-                });
-              }
-
-              if (data.done) {
-                setStreaming(false);
-                // Salva o histórico com as mensagens atuais quando recebe sinal de 'done' do SSE
-                const finalContent = streamingMessageRef.current;
-                setMessages(prev => {
-                  const updated = [...prev];
-                  const lastIdx = updated.length - 1;
-                  if (updated[lastIdx]?.type === 'ai') {
-                    updated[lastIdx] = { ...updated[lastIdx], content: finalContent, streaming: false };
-                    saveToHistory(currentConversationId, updated, selectedLanguage, selectedModel);
-                  }
-                  return updated;
-                });
-              }
-            } catch (parseError) {
-              if (parseError.name !== 'SyntaxError') {
-                throw parseError;
-              }
+            if (data.error) {
+              throw new Error(data.error);
             }
+
+            if (data.content) {
+              streamingMessageRef.current += data.content;
+
+              setMessages(prev => {
+                const updated = [...prev];
+                updated[updated.length - 1] = {
+                  ...updated[updated.length - 1],
+                  content: streamingMessageRef.current
+                };
+                return updated;
+              });
+            }
+
+            if (data.done) {
+              setStreaming(false);
+              const finalContent = streamingMessageRef.current;
+              setMessages(prev => {
+                const updated = [...prev];
+                const lastIdx = updated.length - 1;
+                if (updated[lastIdx]?.type === 'ai') {
+                  updated[lastIdx] = { ...updated[lastIdx], content: finalContent, streaming: false };
+                  saveToHistory(currentConversationId, updated, selectedLanguage, selectedModel);
+                }
+                return updated;
+              });
+            }
+          } catch (parseError) {
+            if (parseError.name !== 'SyntaxError') {
+              throw parseError;
+            }
+            // linhas cortadas serão completadas em próximos chunks via buffer
           }
         }
       }
@@ -656,6 +697,19 @@ function App() {
             </div>
           </div>
 
+          <div className="settings-group">
+            <label className="settings-label">Pré-visualização</label>
+            <button
+              type="button"
+              className={`theme-toggle-btn${includePreview ? ' active' : ''}`}
+              onClick={() => setIncludePreview(!includePreview)}
+              title="Incluir seção de pré-visualização na resposta"
+            >
+              <Sparkles size={18} />
+              <span>{includePreview ? 'Ativada' : 'Desativada'}</span>
+            </button>
+          </div>
+
           {/* Theme Toggle */}
           <div className="settings-group theme-toggle-group">
             <label className="settings-label">Tema</label>
@@ -903,20 +957,56 @@ function App() {
                               components={{
                                 code({ node, inline, className, children, ...props }) {
                                   const match = /language-(\w+)/.exec(className || '');
-                                  const codeString = String(children).replace(/\n$/, '');
+                                  const rawCode = String(children).replace(/\n$/, '');
 
                                   if (!inline && match) {
+                                    const lang = match[1];
+                                    const isHtmlLike = ['html', 'html5', 'xml'].includes(lang.toLowerCase());
+                                    const fullContent = msg.content || '';
+
+                                    // Se houver bloco CSS separado, monta HTML completo com <style> embutido
+                                    let combinedCode = rawCode;
+                                    if (isHtmlLike) {
+                                      const cssMatch = fullContent.match(/```css([\s\S]*?)```/i);
+                                      const cssCode = cssMatch ? cssMatch[1].trim() : '';
+
+                                      if (cssCode) {
+                                        combinedCode = `<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Prévia</title>
+    <style>
+${cssCode}
+    </style>
+  </head>
+  <body>
+${rawCode}
+  </body>
+</html>`;
+                                      }
+                                    }
+
+                                    const openHtmlPreview = () => {
+                                      const html = combinedCode;
+                                      const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+                                      const url = URL.createObjectURL(blob);
+                                      window.open(url, '_blank', 'noopener,noreferrer');
+                                      setTimeout(() => URL.revokeObjectURL(url), 30000);
+                                    };
+
                                     return (
                                       <div className="code-block">
                                         <div className="code-header">
                                           <span className="code-language">
                                             <Code2 size={15} />
-                                            {match[1]}
+                                            {lang}
                                           </span>
                                           <div className="code-actions">
                                             <button
                                               className="code-action-btn"
-                                              onClick={() => copyToClipboard(codeString)}
+                                              onClick={() => copyToClipboard(combinedCode)}
                                               title="Copiar código"
                                             >
                                               <Copy size={14} />
@@ -924,25 +1014,35 @@ function App() {
                                             </button>
                                             <button
                                               className="code-action-btn"
-                                              onClick={() => shareCode(codeString, match[1])}
+                                              onClick={() => shareCode(combinedCode, lang)}
                                               title="Compartilhar"
                                             >
                                               <Share2 size={14} />
                                             </button>
                                             <button
                                               className="code-action-btn"
-                                              onClick={() => downloadCode(codeString, match[1])}
+                                              onClick={() => downloadCode(combinedCode, lang)}
                                               title="Baixar arquivo"
                                             >
                                               <Download size={14} />
                                               Baixar
                                             </button>
+                                            {isHtmlLike && (
+                                              <button
+                                                className="code-action-btn"
+                                                onClick={openHtmlPreview}
+                                                title="Abrir prévia em nova aba"
+                                              >
+                                                <Terminal size={14} />
+                                                Prévia
+                                              </button>
+                                            )}
                                           </div>
                                         </div>
                                         <div className="code-content">
                                           <SyntaxHighlighter
                                             style={vscDarkPlus}
-                                            language={match[1]}
+                                            language={lang}
                                             PreTag="div"
                                             customStyle={{
                                               margin: 0,
@@ -951,7 +1051,7 @@ function App() {
                                             }}
                                             {...props}
                                           >
-                                            {codeString}
+                                            {rawCode}
                                           </SyntaxHighlighter>
                                         </div>
                                       </div>
